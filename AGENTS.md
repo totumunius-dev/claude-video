@@ -14,6 +14,7 @@ Agent Skills package that gives an agent a video input. Installable across Claud
 - `.agents/plugins/marketplace.json` — agents marketplace listing pointing at the repo-root plugin.
 - `CLAUDE.md` → `@AGENTS.md` — generic-agent entry point.
 - `tests/` — pytest suite (ffmpeg-synthesized clips; no network).
+- `assistant/` — **separate app, not part of the skill**: Aria OS, a voice-first multi-agent assistant on the Claude API (see `assistant/README.md`). Not copied by `npx skills add` or `build-skill.sh`.
 
 ## Orientation
 

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aria OS</title>
+<style>
+  :root {
+    --bg: #0b0d14; --panel: #131725; --panel-2: #1a1f31; --line: #262c44;
+    --text: #e8ebf5; --muted: #8b93b0; --accent: #9b7bff; --danger: #ff5c7a;
+    --floor: #151a2b; --floor-line: #232a44;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: 1fr auto;
+    grid-template-areas: "stage side" "chat side"; overflow: hidden;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* ---------- 3D workspace ---------- */
+  #stage { grid-area: stage; position: relative; overflow: hidden; min-height: 0; }
+  #stage h1 { position: absolute; top: 14px; left: 18px; margin: 0; font-size: 15px; letter-spacing: .08em; color: var(--muted); font-weight: 600; z-index: 3; }
+  #stage h1 b { color: var(--text); }
+  #status { position: absolute; top: 14px; right: 18px; color: var(--muted); font-size: 12px; z-index: 3; }
+  /* Floor + pads live on a tilted plane; avatars/beams are drawn flat on top at
+     projected positions (orthographic, so the projection in JS is exact). */
+  #world { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+  #floor { position: absolute; width: 760px; height: 760px; left: -380px; top: -380px; border-radius: 50%;
+           background: radial-gradient(circle, #1c2340 0%, var(--floor) 55%, transparent 72%),
+           repeating-linear-gradient(0deg, transparent 0 47px, var(--floor-line) 47px 48px),
+           repeating-linear-gradient(90deg, transparent 0 47px, var(--floor-line) 47px 48px);
+           -webkit-mask: radial-gradient(circle, #000 55%, transparent 71%); mask: radial-gradient(circle, #000 55%, transparent 71%); }
+  .pad { position: absolute; width: 104px; height: 104px; margin: -52px 0 0 -52px; border-radius: 50%;
+         background: radial-gradient(circle, color-mix(in srgb, var(--c) 35%, transparent), transparent 70%);
+         border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
+  .pad.busy { animation: ring 1.4s ease-out infinite; }
+  @keyframes ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); } 100% { box-shadow: 0 0 0 26px transparent; } }
+  #overlay { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  #beams { position: absolute; overflow: visible; left: 0; top: 0; width: 1px; height: 1px; }
+  #beams line { stroke: var(--c); stroke-width: 2; stroke-dasharray: 8 8; opacity: 0; transition: opacity .4s; }
+  #beams line.on { opacity: .85; animation: flow .8s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -16; } }
+  .avatar { position: absolute; width: 0; height: 0; }
+  .orb { position: absolute; width: 56px; height: 56px; left: -28px; top: -78px; border-radius: 50%;
+         background: radial-gradient(circle at 35% 30%, #fff 0 6%, var(--c) 40%, color-mix(in srgb, var(--c) 40%, #000) 100%);
+         box-shadow: 0 0 24px color-mix(in srgb, var(--c) 55%, transparent); animation: bob 3.2s ease-in-out infinite; }
+  .avatar.busy .orb { animation: bob .8s ease-in-out infinite; box-shadow: 0 0 44px var(--c); }
+  .avatar.aria .orb { width: 80px; height: 80px; left: -40px; top: -104px; }
+  @keyframes bob { 50% { transform: translateY(-8px); } }
+  .label { position: absolute; left: 0; top: -14px; transform: translateX(-50%); white-space: nowrap; text-align: center; pointer-events: none; }
+  .label b { display: block; font-size: 13px; text-shadow: 0 1px 6px #000; }
+  .label span { font-size: 11px; color: var(--muted); display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 6px #000; }
+  .avatar.busy .label span { color: var(--c); }
+  #stage.compact .avatar:not(.busy) .label span { display: none; }
+
+  /* ---------- chat ---------- */
+  #chat { grid-area: chat; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; max-height: 42vh; }
+  #log { overflow-y: auto; overflow-x: hidden; padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; min-height: 90px; }
+  .msg { max-width: 760px; padding: 9px 13px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.aria { align-self: flex-start; background: var(--panel-2); border-bottom-left-radius: 4px; }
+  .msg.event { align-self: flex-start; background: none; color: var(--muted); font-size: 12px; padding: 0 4px; }
+  .msg.error { color: var(--danger); }
+  #composer { display: flex; gap: 8px; padding: 10px 14px 14px; align-items: center; }
+  #input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 22px; padding: 11px 16px; font: inherit; outline: none; }
+  #input:focus { border-color: var(--accent); }
+  .round { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-2); display: grid; place-items: center; flex: none; }
+  #mic.listening { background: var(--danger); border-color: var(--danger); animation: ring 1.2s infinite; --c: var(--danger); }
+  #send { background: var(--accent); border-color: var(--accent); }
+  #speak.off { opacity: .45; }
+  svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- side panel ---------- */
+  #side { grid-area: side; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  #tabs { display: flex; border-bottom: 1px solid var(--line); }
+  #tabs button { flex: 1; background: none; border: 0; padding: 12px 4px; color: var(--muted); border-bottom: 2px solid transparent; font-size: 13px; }
+  #tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  #tabs .n { font-size: 10px; background: var(--panel-2); border-radius: 8px; padding: 1px 5px; margin-left: 3px; }
+  .pane { display: none; overflow-y: auto; padding: 12px; flex: 1; }
+  .pane.on { display: block; }
+  .pane p.hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  .item { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; margin-bottom: 8px; position: relative; }
+  .item .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .item .x { position: absolute; top: 6px; right: 6px; background: none; border: 0; color: var(--muted); font-size: 16px; line-height: 1; padding: 2px 5px; }
+  .item .x:hover { color: var(--danger); }
+  .item.click { cursor: pointer; } .item.click:hover { border-color: var(--accent); }
+  .item .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .item { padding-right: 28px; }
+  form.add { display: grid; gap: 6px; margin-bottom: 12px; }
+  form.add input, form.add textarea { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; }
+  form.add textarea { min-height: 70px; resize: vertical; }
+  form.add label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { color: var(--danger); }
+  .row { display: flex; gap: 6px; justify-content: space-between; margin-bottom: 10px; }
+
+  /* ---------- note viewer ---------- */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; place-items: center; z-index: 10; padding: 16px; }
+  #modal.on { display: grid; }
+  #modal .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: min(760px, 100%); max-height: 86vh; display: flex; flex-direction: column; }
+  #modal header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); gap: 8px; }
+  #modal pre { margin: 0; padding: 16px; overflow: auto; white-space: pre-wrap; font: 14px/1.55 system-ui, sans-serif; }
+
+  @media (max-width: 860px) {
+    body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 44vh auto auto; grid-template-areas: "stage" "chat" "side"; overflow-x: hidden; overflow-y: auto; height: auto; }
+    #side { border-left: 0; border-top: 1px solid var(--line); max-height: 70vh; }
+    #chat { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<section id="stage">
+  <h1><b>ARIA</b> OS</h1>
+  <div id="status">idle</div>
+  <div id="world"><div id="floor"></div></div>
+  <div id="overlay"><svg id="beams"></svg></div>
+</section>
+
+<section id="chat">
+  <div id="log"></div>
+  <form id="composer">
+    <button type="button" id="mic" class="round" title="Talk (hold Space when input is empty)">
+      <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
+    </button>
+    <input id="input" autocomplete="off" placeholder="Ask Aria anything, or give your team a task…">
+    <button type="button" id="speak" class="round" title="Read replies aloud">
+      <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+    </button>
+    <button type="submit" id="send" class="round" title="Send">
+      <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </form>
+</section>
+
+<aside id="side">
+  <nav id="tabs">
+    <button data-tab="team" class="on">Team</button>
+    <button data-tab="memory">Memory<span class="n" id="n-memory">0</span></button>
+    <button data-tab="notes">Notes<span class="n" id="n-notes">0</span></button>
+    <button data-tab="schedules">Schedules</button>
+  </nav>
+  <div class="pane on" id="pane-team">
+    <p class="hint">Aria sends each task to the best companion. You can also ask Aria to “build me a finance companion”.</p>
+    <div id="team"></div>
+    <details><summary class="btn" style="display:inline-block;margin:6px 0 10px">+ New companion</summary>
+      <form class="add" id="add-companion">
+        <input name="key" placeholder="key (e.g. finance)" required>
+        <input name="name" placeholder="Name" required>
+        <input name="role" placeholder="One-line role" required>
+        <textarea name="instructions" placeholder="Instructions — how this companion should work" required></textarea>
+        <label><input type="checkbox" name="web"> Can search the web</label>
+        <button class="btn primary">Add companion</button>
+      </form>
+    </details>
+  </div>
+  <div class="pane" id="pane-memory">
+    <p class="hint">Everything Aria remembers about you. Delete anything, any time.</p>
+    <form class="add" id="add-memory"><input name="text" placeholder="Teach Aria something about you…"></form>
+    <div class="row"><span></span><button class="btn danger" id="clear-memory">Erase all memory</button></div>
+    <div id="memories"></div>
+  </div>
+  <div class="pane" id="pane-notes">
+    <p class="hint">Deliverables your companions saved.</p>
+    <div id="notes"></div>
+  </div>
+  <div class="pane" id="pane-schedules">
+    <p class="hint">Recurring work. Ask Aria: “every morning at 8, have research brief me on AI news”.</p>
+    <div id="schedules"></div>
+    <div class="row" style="margin-top:14px"><span></span><button class="btn danger" id="clear-history">Clear conversation</button></div>
+  </div>
+</aside>
+
+<div id="modal"><div class="card">
+  <header><b id="m-title"></b><div><button class="btn" id="m-copy">Copy</button> <button class="btn" id="m-close">Close</button></div></header>
+  <pre id="m-body"></pre>
+</div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let state = { companions: {}, memories: [], notes: [], schedules: [] };
+let busy = false;
+let speakOn = (() => { try { return localStorage.getItem('aria-speak') !== 'off'; } catch { return true; } })();
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  return r.json();
+}
+
+/* ---------- workspace ---------- */
+const TILT = 58 * Math.PI / 180, SPIN = -38 * Math.PI / 180;
+const desks = {};
+function project(x, y, k) {  // same math as the CSS rotateZ(SPIN) rotateX(TILT) scale(k)
+  const rx = x * Math.cos(SPIN) - y * Math.sin(SPIN), ry = x * Math.sin(SPIN) + y * Math.cos(SPIN);
+  return [rx * k, ry * Math.cos(TILT) * k];
+}
+function layoutWorld() {
+  const world = $('#world'), overlay = $('#overlay'), beams = $('#beams');
+  const st = $('#stage');
+  const k = Math.min(1, st.clientWidth / 700, st.clientHeight / 430);
+  st.classList.toggle('compact', k < .75);
+  world.style.transform = `rotateX(${TILT}rad) rotateZ(${SPIN}rad) scale(${k})`;
+  world.querySelectorAll('.pad').forEach(e => e.remove());
+  overlay.querySelectorAll('.avatar').forEach(e => e.remove());
+  beams.innerHTML = '';
+  for (const key in desks) delete desks[key];
+  const keys = Object.keys(state.companions);
+  const R = keys.length > 6 ? 270 : 230;
+  const spots = [['aria', { name: 'Aria', role: 'Orchestrator', color: '#9b7bff' }, 0, 0]];
+  keys.forEach((key, i) => {
+    const a = (i / keys.length) * Math.PI * 2 - Math.PI / 2;
+    spots.push([key, state.companions[key], Math.cos(a) * R, Math.sin(a) * R]);
+  });
+  // draw back-to-front so nearer avatars overlap farther ones
+  spots.map(s => [...s, project(s[2], s[3], k)]).sort((a, b) => a[4][1] - b[4][1]).forEach(([key, c, x, y, [px, py]]) => {
+    const color = c.color || '#9b7bff';
+    const pad = document.createElement('div');
+    pad.className = 'pad'; pad.style.left = x + 'px'; pad.style.top = y + 'px'; pad.style.setProperty('--c', color);
+    world.appendChild(pad);
+    let line = null;
+    if (key !== 'aria') {
+      line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', 0); line.setAttribute('y1', 0); line.setAttribute('x2', px); line.setAttribute('y2', py);
+      line.style.setProperty('--c', color); beams.appendChild(line);
+    }
+    const av = document.createElement('div');
+    av.className = 'avatar' + (key === 'aria' ? ' aria' : '');
+    av.style.left = px + 'px'; av.style.top = py + 'px'; av.style.transform = `scale(${Math.max(k, .62)})`; av.style.setProperty('--c', color);
+    av.innerHTML = `<div class="orb"></div><div class="label"><b>${esc(c.name)}</b><span>${esc(c.role)}</span></div>`;
+    overlay.appendChild(av);
+    desks[key] = { av, pad, line, role: c.role, span: av.querySelector('.label span') };
+  });
+}
+function setBusy(key, on, text) {
+  const d = desks[key]; if (!d) return;
+  d.av.classList.toggle('busy', on); d.pad.classList.toggle('busy', on);
+  if (d.line) d.line.classList.toggle('on', on);
+  d.span.textContent = on && text ? text : d.role;
+}
+let resizeT; addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (!busy) layoutWorld(); }, 150); });
+
+/* ---------- panels ---------- */
+function render() {
+  $('#team').innerHTML = Object.entries(state.companions).map(([k, c]) => `
+    <div class="item"><button class="x" data-del-companion="${esc(k)}" title="Remove">×</button>
+      <span class="dot" style="background:${esc(c.color)}"></span><b>${esc(c.name)}</b>
+      ${c.web ? '<span class="meta"> · web</span>' : ''}<div class="meta">${esc(c.role)}</div></div>`).join('')
+    + (state.connectors?.length ? `<p class="hint">Connectors: ${state.connectors.map(esc).join(', ')}</p>` : '');
+  $('#memories').innerHTML = state.memories.slice().reverse().map(m => `
+    <div class="item"><button class="x" data-del-memory="${esc(m.id)}" title="Forget">×</button>${esc(m.text)}
+      <div class="meta">${esc(m.source)} · ${new Date(m.created * 1000).toLocaleDateString()}</div></div>`).join('')
+    || '<p class="hint">Nothing yet.</p>';
+  $('#notes').innerHTML = state.notes.slice().reverse().map(n => `
+    <div class="item click" data-open-note="${esc(n.id)}"><button class="x" data-del-note="${esc(n.id)}" title="Delete">×</button>
+      <b>${esc(n.title)}</b><div class="meta">${esc(state.companions[n.companion]?.name || n.companion)} · ${new Date(n.created * 1000).toLocaleString()}</div></div>`).join('')
+    || '<p class="hint">No notes yet.</p>';
+  $('#schedules').innerHTML = state.schedules.map(s => `
+    <div class="item"><button class="x" data-del-schedule="${esc(s.id)}" title="Cancel">×</button>
+      <b>${esc(state.companions[s.companion]?.name || s.companion)}</b>: ${esc(s.task)}
+      <div class="meta">${s.every_minutes ? 'every ' + s.every_minutes + ' min' : 'daily at ' + esc(s.daily_at)}
+      ${s.last_run ? ' · last run ' + new Date(s.last_run * 1000).toLocaleString() + ' (' + esc(s.last_result) + ')' : ''}</div></div>`).join('')
+    || '<p class="hint">No schedules yet.</p>';
+  $('#n-memory').textContent = state.memories.length;
+  $('#n-notes').textContent = state.notes.length;
+}
+async function refresh(full) {
+  const prevTeam = JSON.stringify(state.companions);
+  state = await api('/api/state');
+  if (full || prevTeam !== JSON.stringify(state.companions)) layoutWorld();
+  render();
+  return state;
+}
+
+/* ---------- chat ---------- */
+function addMsg(cls, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + cls; el.textContent = text;
+  $('#log').appendChild(el); $('#log').scrollTop = 1e9;
+  return el;
+}
+function nameOf(k) { return k === 'aria' ? 'Aria' : (state.companions[k]?.name || k); }
+
+async function send(text) {
+  text = text.trim();
+  if (!text || busy) return;
+  busy = true; $('#input').value = ''; speechSynthesis?.cancel();
+  addMsg('user', text);
+  $('#status').textContent = 'thinking…'; setBusy('aria', true, 'Thinking…');
+  try {
+    const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (line.startsWith('data: ')) onEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  } catch (e) { addMsg('aria error', 'Connection failed: ' + e.message); }
+  busy = false; setBusy('aria', false); Object.keys(desks).forEach(k => setBusy(k, false));
+  $('#status').textContent = 'idle'; refresh();
+}
+function onEvent(ev) {
+  switch (ev.type) {
+    case 'companion_start':
+      setBusy(ev.who, true, ev.task.slice(0, 60));
+      addMsg('event', `→ ${nameOf(ev.who)}: ${ev.task.slice(0, 140)}${ev.task.length > 140 ? '…' : ''}`);
+      $('#status').textContent = 'team working…'; break;
+    case 'companion_done': setBusy(ev.who, false); addMsg('event', `✓ ${nameOf(ev.who)} ${ev.ok ? 'finished' : 'failed'}`); break;
+    case 'tool': if (desks[ev.who]) desks[ev.who].span.textContent = ev.tool.replace(/_/g, ' ') + '…'; break;
+    case 'memory': if (ev.action === 'add') addMsg('event', `✎ remembered: ${ev.item.text}`); refresh(); break;
+    case 'note': addMsg('event', `📄 saved note: ${ev.item.title}`); refresh(); break;
+    case 'team_changed': case 'schedules_changed': refresh(); break;
+    case 'reply': addMsg('aria', ev.text); speak(ev.text); break;
+    case 'error': addMsg('aria error', 'Error: ' + ev.message); break;
+  }
+}
+
+/* ---------- voice ---------- */
+function speak(text) {
+  if (!speakOn || !window.speechSynthesis) return;
+  const clean = text.replace(/[#*_`>|]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/https?:\/\/\S+/g, 'link');
+  const u = new SpeechSynthesisUtterance(clean.slice(0, 1500));
+  const v = speechSynthesis.getVoices().find(v => /Samantha|Google US English|Aria|Jenny|Female/i.test(v.name));
+  if (v) u.voice = v;
+  u.rate = 1.03; speechSynthesis.speak(u);
+}
+$('#speak').classList.toggle('off', !speakOn);
+$('#speak').onclick = () => {
+  speakOn = !speakOn; $('#speak').classList.toggle('off', !speakOn);
+  if (!speakOn) speechSynthesis?.cancel();
+  try { localStorage.setItem('aria-speak', speakOn ? 'on' : 'off'); } catch {}
+};
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+if (SR) {
+  rec = new SR(); rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false;
+  rec.onresult = e => {
+    let t = ''; for (const r of e.results) t += r[0].transcript;
+    $('#input').value = t;
+    if (e.results[e.results.length - 1].isFinal) { stopListening(); send(t); }
+  };
+  rec.onend = () => stopListening();
+  rec.onerror = e => { stopListening(); if (e.error !== 'no-speech' && e.error !== 'aborted') addMsg('event', 'Mic error: ' + e.error); };
+} else {
+  $('#mic').title = 'Voice input needs Chrome, Edge, or Safari';
+}
+function startListening() {
+  if (!rec) { addMsg('event', 'Voice input is not supported in this browser — try Chrome, Edge, or Safari.'); return; }
+  if (listening || busy) return;
+  speechSynthesis?.cancel(); listening = true; $('#mic').classList.add('listening'); $('#status').textContent = 'listening…';
+  try { rec.start(); } catch { stopListening(); }
+}
+function stopListening() {
+  if (!listening) return; listening = false; $('#mic').classList.remove('listening');
+  if (!busy) $('#status').textContent = 'idle';
+  try { rec.stop(); } catch {}
+}
+$('#mic').onclick = () => listening ? stopListening() : startListening();
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && document.activeElement === $('#input') && !$('#input').value && !e.repeat) { e.preventDefault(); startListening(); }
+});
+
+/* ---------- wiring ---------- */
+$('#composer').onsubmit = e => { e.preventDefault(); send($('#input').value); };
+$('#tabs').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.id === 'pane-' + b.dataset.tab));
+};
+document.body.addEventListener('click', async e => {
+  const t = e.target.closest('[data-del-memory],[data-del-note],[data-del-schedule],[data-del-companion],[data-open-note]');
+  if (!t) return;
+  if (t.dataset.delMemory) await api('/api/memory/' + t.dataset.delMemory, { method: 'DELETE' });
+  else if (t.dataset.delNote) { e.stopPropagation(); if (!confirm('Delete this note?')) return; await api('/api/notes/' + t.dataset.delNote, { method: 'DELETE' }); }
+  else if (t.dataset.delSchedule) await api('/api/schedules/' + t.dataset.delSchedule, { method: 'DELETE' });
+  else if (t.dataset.delCompanion) { if (!confirm('Remove this companion?')) return; await api('/api/companions/' + t.dataset.delCompanion, { method: 'DELETE' }); }
+  else if (t.dataset.openNote) { const n = await api('/api/notes/' + t.dataset.openNote); $('#m-title').textContent = n.title; $('#m-body').textContent = n.content; $('#modal').classList.add('on'); return; }
+  refresh();
+});
+$('#m-close').onclick = () => $('#modal').classList.remove('on');
+$('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').classList.remove('on'); };
+$('#m-copy').onclick = () => navigator.clipboard?.writeText($('#m-body').textContent);
+$('#clear-memory').onclick = async () => { if (confirm('Erase everything Aria remembers about you?')) { await api('/api/memory', { method: 'DELETE' }); refresh(); } };
+$('#clear-history').onclick = async () => { if (confirm('Clear the conversation history?')) { await api('/api/history', { method: 'DELETE' }); $('#log').innerHTML = ''; } };
+$('#add-memory').onsubmit = async e => { e.preventDefault(); const f = e.target; if (!f.text.value.trim()) return; await api('/api/memory', { method: 'POST', body: JSON.stringify({ text: f.text.value }) }); f.reset(); refresh(); };
+$('#add-companion').onsubmit = async e => {
+  e.preventDefault(); const f = e.target;
+  const r = await api('/api/companions', { method: 'POST', body: JSON.stringify({ key: f.key.value, name: f.name.value, role: f.role.value, instructions: f.instructions.value, web: f.web.checked }) });
+  if (r.error) return alert(r.error);
+  f.reset(); f.closest('details').open = false; refresh();
+};
+
+refresh(true).then(s => {
+  s.history.slice(-12).forEach(m => addMsg(m.role === 'user' ? 'user' : 'aria', m.content));
+  if (!s.history.length) addMsg('aria', "Hi, I'm Aria. Tell me about your goals and I'll put your team to work — tap the mic or type.");
+});
+setInterval(() => { if (!busy) refresh(); }, 30000);
+</script>
+</body>
+</html>
