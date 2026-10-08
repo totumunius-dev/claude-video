@@ -14,6 +14,20 @@ npm test
 npm run build
 ```
 
+## Voice and Claude
+
+- **Talks:** replies are read aloud with the browser's built-in voice (🔊 in the chat header turns it off).
+- **Thinks:** when the page runs as a claude.ai artifact, Core and the companions use the viewer's own
+  Claude through the `sample` capability (`src/ai/`). Core sees the workspace (goal, memory, roster,
+  Brain, open work) and acts only through tools that call the app's own flows: delegate, dispatch,
+  run the research chain, open the Companion Builder, connect Gmail, draft an email for approval,
+  remember a fact, read a Brain entry. Open-ended delegations and direct questions are answered by
+  the model; the named demo playbooks stay deterministic. The header shows **CLAUDE** when this is on.
+  Anywhere else (including `npm run dev`) it shows **QUICK COMMANDS** and uses the keyword router.
+- **Hears:** the mic uses the browser's speech recognition (Chrome, Edge, Safari). Artifacts are not
+  allowed a microphone, so there the mic falls back to demo voice. **HANDS-FREE** listens again after
+  each spoken reply when a real microphone is available.
+
 ## Try it
 
 Open the chat's **+** menu, or tap the mic for a mock voice turn that "hears" the

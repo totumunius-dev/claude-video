@@ -17,7 +17,25 @@ import { clock } from "./clock";
 import { activity, log, notify, say } from "./events";
 import { uid } from "./ids";
 import { readableFolders, searchKnowledge } from "./knowledge";
-import { PLAYBOOKS, type EntryDraft } from "./playbooks";
+import { PLAYBOOKS, type EntryDraft, type PlaybookContext, type Production } from "./playbooks";
+import { ai, handleAIError } from "../ai/provider";
+import { smartAnswer, smartWork } from "../ai/companions";
+
+/** Open-ended work uses the model when one is available; named demo playbooks stay deterministic. */
+async function produce(d: Delegation, ctx: PlaybookContext): Promise<Production> {
+  const pb = PLAYBOOKS[d.playbook];
+  const provider = ai();
+  const smart = d.playbook === "direct-question" ? smartAnswer : d.playbook === "generic" ? smartWork : null;
+  if (provider && smart) {
+    try {
+      return await smart(provider, ctx);
+    } catch (e) {
+      handleAIError(e);
+      log("ai", `${d.to} fell back to the preview playbook (${(e as { code?: string })?.code ?? "error"})`, "warn");
+    }
+  }
+  return pb.produce(ctx);
+}
 
 const name = (id: "core" | CompanionId) => (id === "core" ? "Core" : getCompanion(id)?.name ?? id);
 
@@ -245,7 +263,8 @@ export async function runDelegation(id: Id, opts: RunOptions = {}): Promise<Dele
   if (d.status === "CANCELLED") return finishCancelled(id, companion, run.id);
   if (opts.failWith) return fail(id, companion, run.id, opts.failWith, stepIndex);
 
-  const production = pb.produce({ companion: getCompanion(companion.id)!, instruction: d.instruction, knowledge, inputs, subAgentResults });
+  const production = await produce(d, { companion: getCompanion(companion.id)!, instruction: d.instruction, knowledge, inputs, subAgentResults });
+  if (getDelegation(id)?.status === "CANCELLED") return finishCancelled(id, companion, run.id);
   const created = production.entry ? [saveEntry(production.entry, companion, knowledge)] : [];
   const result: DelegationResult = {
     summary: production.summary,

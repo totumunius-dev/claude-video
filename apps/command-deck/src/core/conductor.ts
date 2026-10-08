@@ -7,7 +7,10 @@ import { useUI } from "../state/uiStore";
 import { TERMINAL_STATUSES, type ThreadId } from "../types/models";
 import { clock } from "./clock";
 import { createDelegation, delegateOne, dispatchAll, runCampaignChain, runDelegation } from "./engine";
-import { activity, say } from "./events";
+import { activity, notify, say, withMutedSpeech } from "./events";
+import { ai, handleAIError } from "../ai/provider";
+import { smartCoreReply } from "../ai/core";
+import { isSpeaking } from "../voice/speech";
 import { draftEmail, requestGmailConnection } from "./gmail";
 import { uid } from "./ids";
 import { DEMO_COMMANDS, parseIntent, type Intent } from "./intents";
@@ -19,6 +22,16 @@ export const PREVIEW_DISPATCH_FAILURES: Record<string, string> = {
   counsel: "Policy library is unavailable in Preview Mode",
 };
 
+function settleVoice() {
+  const conv = useConversation.getState();
+  conv.setPending("core", false);
+  if (isSpeaking()) return; // the spoken reply drives the voice state
+  conv.setVoice("speaking");
+  setTimeout(() => {
+    if (useConversation.getState().voice === "speaking" && !isSpeaking()) useConversation.getState().setVoice("idle");
+  }, 1500 * clock.speed);
+}
+
 async function speak<T>(work: () => Promise<T> | T): Promise<T> {
   const conv = useConversation.getState();
   conv.setPending("core", true);
@@ -27,12 +40,34 @@ async function speak<T>(work: () => Promise<T> | T): Promise<T> {
   try {
     return await work();
   } finally {
-    conv.setPending("core", false);
-    conv.setVoice("speaking");
-    setTimeout(() => {
-      if (useConversation.getState().voice === "speaking") useConversation.getState().setVoice("idle");
-    }, 1800 * clock.speed);
+    settleVoice();
   }
+}
+
+/** Core answers with the model when available. Returns false when the caller should use the keyword router. */
+async function smartTurn(): Promise<boolean> {
+  const provider = ai();
+  if (!provider) return false;
+  const conv = useConversation.getState();
+  conv.setPending("core", true);
+  conv.setVoice("thinking");
+  const background: Promise<unknown>[] = [];
+  try {
+    const reply = await withMutedSpeech(() => smartCoreReply(provider, background));
+    conv.setPending("core", false);
+    if (reply) say("core", "core", reply);
+    settleVoice();
+  } catch (e) {
+    const code = handleAIError(e);
+    conv.setPending("core", false);
+    conv.setVoice("idle");
+    if (code === "cancelled") return true;
+    if (code === "rate_limited") notify("Claude is busy for a moment. Using quick commands instead.", "warn");
+    if (code === "not_granted") notify("Claude wasn't allowed, so Core is using quick commands.", "warn");
+    if (!background.length) return false; // nothing happened yet: let the keyword router answer
+  }
+  await Promise.all(background);
+  return true;
 }
 
 /** Entry point for every message the user sends. Resolves when all triggered work has finished. */
@@ -41,6 +76,8 @@ export async function handleUserMessage(text: string, thread: ThreadId = "core")
   if (!trimmed) return;
   say(thread, "user", trimmed);
   if (thread !== "core") return askCompanionDirectly(thread, trimmed);
+
+  if (await smartTurn()) return;
 
   let background: Promise<unknown> | null = null;
   await speak(() => {

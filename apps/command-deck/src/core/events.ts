@@ -4,11 +4,25 @@ import { useUI } from "../state/uiStore";
 import type { ActivityEvent, ChatMessage, LogEntry, MessageCard, ThreadId } from "../types/models";
 import { clock } from "./clock";
 import { uid } from "./ids";
+import { speak } from "../voice/speech";
+
+let muted = 0;
+
+/** Run `fn` without speaking the messages it posts (Core speaks one summary reply instead). */
+export async function withMutedSpeech<T>(fn: () => Promise<T>): Promise<T> {
+  muted += 1;
+  try {
+    return await fn();
+  } finally {
+    muted -= 1;
+  }
+}
 
 /** Post a message to a chat thread. */
 export function say(thread: ThreadId, author: ChatMessage["author"], text: string, card?: MessageCard): ChatMessage {
   const m: ChatMessage = { id: uid("msg"), thread, author, text, at: clock.now(), ...(card ? { card } : {}) };
   useConversation.getState().add(m);
+  if (author !== "user" && !muted && useUI.getState().activeThread === thread) speak(text, author);
   return m;
 }
 

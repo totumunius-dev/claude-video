@@ -59,8 +59,9 @@ header.top { grid-column: 2 / 5; display: flex; align-items: center; justify-con
 .pill.voice.speaking, .pill.voice.listening, .pill.voice.transcribing { color: #ffb1b1; }
 .pill.voice.speaking .dot, .pill.voice.listening .dot, .pill.voice.transcribing .dot { background: var(--red); box-shadow: 0 0 10px var(--red); }
 .pill.preview { color: var(--info); border-color: rgba(108, 198, 255, 0.25); font-size: 11px; padding: 5px 12px; }
+.pill.ai { color: var(--accent); border-color: var(--line-hot); background: var(--accent-soft); font-size: 11px; padding: 5px 12px; }
 .pill.mood { color: var(--accent); font-weight: 700; }
-.hdr-center { display: flex; gap: 10px; align-items: center; }
+.hdr-center { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .hdr-right { display: flex; align-items: center; gap: 24px; }
 .clock { color: var(--muted); letter-spacing: 0.14em; font-size: 15px; font-variant-numeric: tabular-nums; }
 
@@ -227,11 +228,15 @@ input.inp { width: 100%; }
 
 /* chat */
 .chat { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-.tabs { display: flex; align-items: center; border-bottom: 1px solid var(--line); padding-inline: 8px; overflow-x: auto; scrollbar-width: none; flex: none; }
+.chat-head { display: flex; align-items: center; border-bottom: 1px solid var(--line); padding-right: 12px; flex: none; min-width: 0; }
+.tabs { display: flex; align-items: center; padding-inline: 8px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
 .tabs button { padding: 12px 12px 10px; color: var(--muted); letter-spacing: 0.1em; font-weight: 700; border-bottom: 3px solid transparent; white-space: nowrap; font-size: 12px; transition: color 0.2s; }
 .tabs button.on { color: var(--red); border-color: var(--red); background: linear-gradient(to top, rgba(255, 59, 59, 0.12), transparent); }
 .tabs button .busy { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: middle; animation: pulse 1s infinite; }
-.tabs .rec { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; box-shadow: 0 0 8px var(--red); }
+.voice-tools { margin-left: auto; display: flex; gap: 4px; padding-left: 8px; flex: none; }
+.voice-tools button { font-size: 10px; letter-spacing: 0.1em; color: var(--dim); padding: 4px 8px; border-radius: 999px; border: 1px solid transparent; }
+.voice-tools button.on { color: var(--accent); border-color: var(--line-hot); }
+.tabs .rec { margin-left: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; box-shadow: 0 0 8px var(--red); }
 .msgs { flex: 1; overflow: auto; padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .msgs > :last-child { animation: msgIn 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .msg { max-width: 88%; border-radius: 16px; padding: 10px 16px; white-space: pre-wrap; overflow-wrap: anywhere; }

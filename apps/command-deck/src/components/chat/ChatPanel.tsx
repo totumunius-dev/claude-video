@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { handleUserMessage } from "../../core/conductor";
+import { notify } from "../../core/events";
+import { useContext } from "../../state/contextStore";
+import { canListen, listen } from "../../voice/listen";
+import { canSpeak, onSpeechDone, stopSpeaking } from "../../voice/speech";
 import { DEMO_COMMANDS } from "../../core/intents";
 import { useCompanions } from "../../state/companionStore";
 import { useConversation } from "../../state/conversationStore";
@@ -44,8 +48,14 @@ export function ChatPanel() {
   const setVoice = useConversation((s) => s.setVoice);
   const [text, setText] = useState("");
   const [menu, setMenu] = useState(false);
+  const voiceReplies = useContext((s) => s.voiceReplies);
+  const handsFree = useContext((s) => s.handsFree);
+  const setVoicePrefs = useContext((s) => s.setVoicePrefs);
   const scroller = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
+  const stopListening = useRef<(() => void) | null>(null);
+  const threadRef = useRef(thread);
+  threadRef.current = thread;
 
   const tabs = ["core", ...CHAT_TABS.filter((id) => companions.some((c) => c.id === id)), ...companions.filter((c) => !CHAT_TABS.includes(c.id)).map((c) => c.id)];
   const current = companions.find((c) => c.id === thread);
@@ -57,53 +67,120 @@ export function ChatPanel() {
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  const send = (value: string) => {
+  const send = useCallback((value: string) => {
     const v = value.trim();
     if (!v) return;
     setText("");
     setMenu(false);
-    void handleUserMessage(v, thread);
-  };
+    void handleUserMessage(v, threadRef.current);
+  }, []);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     send(text);
   };
 
-  /** Mock voice: listen, "transcribe" the next demo command, then send it. */
-  const toggleMic = () => {
-    if (voice === "listening" || voice === "transcribing") {
-      timers.current.forEach(clearTimeout);
-      setVoice("idle");
-      return;
-    }
+  /** Demo voice for places without a microphone: "hears" the next demo command. */
+  const mockListen = useCallback(() => {
     setVoice("listening");
-    const said = messages.filter((m) => m.author === "user" && m.thread === "core").length;
-    const phrase = thread === "core" ? DEMO_COMMANDS[said % DEMO_COMMANDS.length] : "What should we focus on this week?";
+    const said = useConversation.getState().messages.filter((m) => m.author === "user" && m.thread === "core").length;
+    const phrase = threadRef.current === "core" ? DEMO_COMMANDS[said % DEMO_COMMANDS.length] : "What should we focus on this week?";
     timers.current = [
       window.setTimeout(() => setVoice("transcribing"), 1600),
       window.setTimeout(() => {
+        timers.current = [];
         setVoice("idle");
         send(phrase);
       }, 2500),
     ];
+  }, [send, setVoice]);
+
+  const startListening = useCallback(() => {
+    stopSpeaking();
+    if (!canListen()) return mockListen();
+    setVoice("listening");
+    stopListening.current = listen({
+      onInterim: (t) => {
+        setText(t);
+        if (t) setVoice("transcribing");
+      },
+      onFinal: (t) => {
+        setVoice("idle");
+        send(t);
+      },
+      onError: (kind) => {
+        if (kind === "blocked") {
+          notify("The microphone isn't available here, so I'm using demo voice. Run the app on your computer in Chrome to talk for real.", "warn");
+          mockListen();
+        } else if (kind === "no-speech") notify("I didn't hear anything. Tap the mic and try again.", "warn");
+      },
+      onEnd: () => {
+        stopListening.current = null;
+        const v = useConversation.getState().voice;
+        if (!timers.current.length && (v === "listening" || v === "transcribing")) setVoice("idle");
+      },
+    });
+  }, [mockListen, send, setVoice]);
+
+  const toggleMic = () => {
+    if (voice === "listening" || voice === "transcribing") {
+      timers.current.forEach(clearTimeout);
+      timers.current = [];
+      stopListening.current?.();
+      setVoice("idle");
+      return;
+    }
+    startListening();
   };
+
+  // Hands-free: listen again as soon as a spoken reply finishes.
+  useEffect(() => {
+    onSpeechDone(handsFree && canListen() ? () => window.setTimeout(startListening, 300) : null);
+    return () => onSpeechDone(null);
+  }, [handsFree, startListening]);
 
   const placeholder =
     voice === "listening" ? "Listening… (mock)" : voice === "transcribing" ? "Transcribing…" : `You're talking to ${current?.name ?? "Core"} through voice`;
 
   return (
     <section className="card chat" aria-label="Chat">
-      <div className="tabs" role="tablist">
-        {tabs.map((id) => {
-          const c = companions.find((x) => x.id === id);
-          return (
-            <button key={id} role="tab" aria-selected={thread === id} className={thread === id ? "on" : ""} onClick={() => setThread(id)}>
-              {id === "core" ? "CORE" : c?.name.toUpperCase()}
-              {c?.status === "BUSY" && <span className="busy" aria-label="busy" />}
+      <div className="chat-head">
+        <div className="tabs" role="tablist">
+          {tabs.map((id) => {
+            const c = companions.find((x) => x.id === id);
+            return (
+              <button key={id} role="tab" aria-selected={thread === id} className={thread === id ? "on" : ""} onClick={() => setThread(id)}>
+                {id === "core" ? "CORE" : c?.name.toUpperCase()}
+                {c?.status === "BUSY" && <span className="busy" aria-label="busy" />}
+              </button>
+            );
+          })}
+        </div>
+        <span className="voice-tools">
+          {canSpeak() && (
+            <button
+              className={voiceReplies ? "on" : ""}
+              aria-pressed={voiceReplies}
+              title={voiceReplies ? "Voice replies on" : "Voice replies off"}
+              onClick={() => {
+                if (voiceReplies) stopSpeaking();
+                setVoicePrefs({ voiceReplies: !voiceReplies });
+              }}
+            >
+              {voiceReplies ? "🔊" : "🔇"}
             </button>
-          );
-        })}
+          )}
+          {canListen() && (
+            <button
+              className={handsFree ? "on" : ""}
+              aria-pressed={handsFree}
+              title="Hands-free: listen again after each reply"
+              onClick={() => setVoicePrefs({ handsFree: !handsFree })}
+            >
+              HANDS-FREE
+            </button>
+          )}
+        </span>
         <span className="rec" />
       </div>
       {current && <CompanionProfile id={current.id} />}
@@ -137,7 +214,7 @@ export function ChatPanel() {
           </div>
         )}
         <button type="button" className="plus" aria-label="Suggested commands" aria-expanded={menu} onClick={() => setMenu(!menu)}>+</button>
-        <button type="button" className={`mic ${voice === "listening" || voice === "transcribing" ? "live" : ""}`} aria-label="Voice input (mock)" onClick={toggleMic}>
+        <button type="button" className={`mic ${voice === "listening" || voice === "transcribing" ? "live" : ""}`} aria-label={canListen() ? "Talk" : "Voice input (demo)"} onClick={toggleMic}>
           <i />
         </button>
         <input id="chat-input" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} aria-label="Message" />

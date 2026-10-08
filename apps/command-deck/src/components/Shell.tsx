@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BRAND } from "../data/seed";
+import { useAI } from "../ai/provider";
 import { useConversation } from "../state/conversationStore";
 import { useUI, type View } from "../state/uiStore";
 import { Icon } from "./ui";
@@ -56,6 +57,16 @@ const VOICE_LABEL = {
 
 const MOODS = ["CALM", "FOCUSED", "HYPED", "CHILL"];
 
+function AIPill() {
+  const status = useAI((s) => s.status);
+  if (status === "checking") return null;
+  return status === "ready" ? (
+    <span className="pill ai" title="Core and companions think with Claude, on your own Claude account">CLAUDE</span>
+  ) : (
+    <span className="pill preview" title="Claude isn't available here. Core understands the demo commands.">QUICK COMMANDS</span>
+  );
+}
+
 export function Header() {
   const voice = useConversation((s) => s.voice);
   const [now, setNow] = useState(() => new Date());
@@ -75,6 +86,7 @@ export function Header() {
           {VOICE_LABEL[voice]}
         </div>
         <span className="pill preview" title="Mock data only. No real services are connected.">PREVIEW MODE</span>
+        <AIPill />
       </div>
       <div className="hdr-right">
         <button className="pill mood" onClick={() => setMood((m) => m + 1)} title="Change mood">

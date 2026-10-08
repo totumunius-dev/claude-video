@@ -8,6 +8,9 @@ import { persistOptions } from "./persist";
 interface ContextState {
   workspaceGoal: string;
   memory: MemoryItem[];
+  voiceReplies: boolean;
+  handsFree: boolean;
+  setVoicePrefs(p: Partial<{ voiceReplies: boolean; handsFree: boolean }>): void;
   setGoal(goal: string): void;
   addMemory(m: MemoryItem): void;
   editMemory(id: Id, text: string): void;
@@ -15,12 +18,13 @@ interface ContextState {
   reset(): void;
 }
 
-const initial = () => ({ workspaceGoal: WORKSPACE_GOAL, memory: structuredClone(SEED_MEMORY) });
+const initial = () => ({ workspaceGoal: WORKSPACE_GOAL, memory: structuredClone(SEED_MEMORY), voiceReplies: true, handsFree: false });
 
 export const useContext = create<ContextState>()(
   persist(
     (set) => ({
       ...initial(),
+      setVoicePrefs: (p) => set(p),
       setGoal: (workspaceGoal) =>
         set((s) => ({
           workspaceGoal,
@@ -35,6 +39,11 @@ export const useContext = create<ContextState>()(
       forgetMemory: (id) => set((s) => ({ memory: s.memory.filter((m) => m.id !== id) })),
       reset: () => set(initial()),
     }),
-    persistOptions<ContextState>("context", (s) => ({ workspaceGoal: s.workspaceGoal, memory: s.memory })),
+    persistOptions<ContextState>("context", (s) => ({
+      workspaceGoal: s.workspaceGoal,
+      memory: s.memory,
+      voiceReplies: s.voiceReplies,
+      handsFree: s.handsFree,
+    })),
   ),
 );
