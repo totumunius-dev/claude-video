@@ -14,6 +14,7 @@ Agent Skills package that gives an agent a video input. Installable across Claud
 - `.agents/plugins/marketplace.json` — agents marketplace listing pointing at the repo-root plugin.
 - `CLAUDE.md` → `@AGENTS.md` — generic-agent entry point.
 - `tests/` — pytest suite (ffmpeg-synthesized clips; no network).
+- `apps/command-deck/` — separate NOVA_OS Command Deck web app (Vite + React + TS, Preview Mode mock data). Unrelated to the watch skill; see its README.
 
 ## Orientation
 

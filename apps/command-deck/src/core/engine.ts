@@ -260,7 +260,8 @@ export async function runDelegation(id: Id, opts: RunOptions = {}): Promise<Dele
   useCompanions.getState().logActivity(companion.id, `Completed: ${d.title}`);
   activity(companion.id, "delegation", `${companion.name} completed: ${d.title}`, id);
   log("delegation", `${id} [COMPLETED] used=${result.knowledgeUsed.length} created=${result.knowledgeCreated.length}`);
-  say(companion.id, companion.id, production.summary, { type: "result", delegationId: id });
+  if (d.playbook === "direct-question") say(companion.id, companion.id, production.summary);
+  else say(companion.id, companion.id, `Finished "${d.title}".`, { type: "result", delegationId: id });
   return getDelegation(id)!;
 }
 

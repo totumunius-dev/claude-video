@@ -15,6 +15,7 @@ interface UIState {
   view: View;
   brainMode: BrainMode;
   brainFolder: string | null;
+  brainCompanion: string | null;
   selectedEntry: Id | null;
   activeThread: ThreadId;
   builderOpen: CompanionId | null;
@@ -23,6 +24,7 @@ interface UIState {
   setView(v: View): void;
   setBrainMode(m: BrainMode): void;
   openFolder(f: string | null): void;
+  setBrainCompanion(c: string | null): void;
   openEntry(id: Id | null): void;
   setThread(t: ThreadId): void;
   openBuilder(id: CompanionId | null): void;
@@ -35,6 +37,7 @@ export const useUI = create<UIState>()((set) => ({
   view: "world",
   brainMode: "folders",
   brainFolder: null,
+  brainCompanion: null,
   selectedEntry: null,
   activeThread: "core",
   builderOpen: null,
@@ -43,6 +46,7 @@ export const useUI = create<UIState>()((set) => ({
   setView: (view) => set({ view }),
   setBrainMode: (brainMode) => set({ brainMode }),
   openFolder: (brainFolder) => set({ brainFolder }),
+  setBrainCompanion: (brainCompanion) => set({ brainCompanion }),
   openEntry: (selectedEntry) => set({ selectedEntry }),
   setThread: (activeThread) => set({ activeThread }),
   openBuilder: (builderOpen) => set({ builderOpen }),
